@@ -1,7 +1,4 @@
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
@@ -16,20 +13,20 @@
 #define FALL_ACCELERATION_G 2
 #define MQTT_ENDPOINT "broker.emqx.io"
 #define MQTT_PORTNUM 1883
+#define DEVICE_NAME "ESP32"
 #define SERVICE_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
 #define SENSOR_CHARACTERISTIC_UUID "19b10001-e8f2-537e-4f6c-d104768a1214"
 #define LED_CHARACTERISTIC_UUID "19b10002-e8f2-537e-4f6c-d104768a1214"
-#define BLE_RESET_MS 500
-#define BLE_DATA_INTERVAL_MS 3000
+#define BLE_DATA_INTERVAL_MS 500
 #define FALL_LED_FLASH_INTERVAL_MS 500
 
 unsigned long previousMs = 0;
 unsigned long ledPreviousMs = 0;
-unsigned long blePreviousResetMs = 0;
 unsigned long blePreviousDataIntervalMs = 0;
 float z_acc = 0.0f;
 bool ledRedOn = false;
 bool hasFallen = false;
+bool deviceConnected = false;
 char* WIFI_SSID = "Wokwi-GUEST";
 char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
@@ -37,32 +34,44 @@ char MQTT_CLIENT_NAME[32] = "SmartFall_";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-
-BLEServer *pServer = NULL;
-BLECharacteristic *pSensorCharacteristic = NULL;
-BLECharacteristic *pLedCharacteristic = NULL;
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
+NimBLEServer *pServer = NULL;
+NimBLECharacteristic *pLedCharacteristic = NULL;
+NimBLECharacteristic *pSensorCharacteristic = NULL;
 
 // Adafruit_MPU6050 mpu;
 // sensors_event_t acc, gcc, temp;
 
-class MyServerCallbacks : public BLEServerCallbacks
+class MyServerCallbacks : public NimBLEServerCallbacks
 {
-  void onConnect(BLEServer *pServer)
+  void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override
   {
+    Serial.printf("Client address: %s\n", connInfo.getAddress().toString().c_str());
+    /**
+     *  We can use the connection handle here to ask for different connection parameters.
+     *  Args: connection handle, min connection interval, max connection interval
+     *  latency, supervision timeout.
+     *  Units; Min/Max Intervals: 1.25 millisecond increments.
+     *  Latency: number of intervals allowed to skip.
+     *  Timeout: 10 millisecond increments.
+     */
+    pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
     deviceConnected = true;
   };
 
-  void onDisconnect(BLEServer *pServer)
+  void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override
   {
+    Serial.printf("Client disconnected, automatically advertising...\n");
+    // Peer disconnected, add them to the whitelist
+    // This allows us to use the whitelist to filter connection attempts
+    // which will minimize reconnection time.
+    NimBLEDevice::whiteListAdd(connInfo.getAddress());
     deviceConnected = false;
   }
-};
+} serverCallbacks;
 
-class MyCharacteristicCallbacks : public BLECharacteristicCallbacks
+class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
 {
-  void onWrite(BLECharacteristic *pLedCharacteristic)
+  void onWrite(NimBLECharacteristic *pLedCharacteristic, NimBLEConnInfo &connInfo) override
   {
     std::string value = pLedCharacteristic->getValue();
     if (value.length() > 0)
@@ -81,50 +90,48 @@ class MyCharacteristicCallbacks : public BLECharacteristicCallbacks
       }
     }
   }
-};
+} chrCallbacks;
 
 void ble_setup()
 {
   // Create the BLE Device
-  BLEDevice::init("ESP32");
+  NimBLEDevice::init(DEVICE_NAME);
 
+  // NimBLEDevice::setSecurityAuth(false, false, false);
   // Create the BLE Server
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(&serverCallbacks);
+  pServer->advertiseOnDisconnect(true);
 
   // Create the BLE Service
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  NimBLEService *pService = pServer->createService(SERVICE_UUID);
 
   // Create a BLE Characteristic
   pSensorCharacteristic = pService->createCharacteristic(
       SENSOR_CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_READ |
-          BLECharacteristic::PROPERTY_WRITE |
-          BLECharacteristic::PROPERTY_NOTIFY |
-          BLECharacteristic::PROPERTY_INDICATE);
+      NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::NOTIFY |
+          NIMBLE_PROPERTY::INDICATE);
 
   // Create the ON button Characteristic
   pLedCharacteristic = pService->createCharacteristic(
       LED_CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_WRITE);
+      NIMBLE_PROPERTY::WRITE);
 
   // Register the callback for the ON button characteristic
-  pLedCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
-
-  // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.descriptor.gatt.client_characteristic_configuration.xml
-  // Create a BLE Descriptor
-  pSensorCharacteristic->addDescriptor(new BLE2902());
-  pLedCharacteristic->addDescriptor(new BLE2902());
+  pLedCharacteristic->setCallbacks(&chrCallbacks);
 
   // Start the service
   pService->start();
 
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(false);
-  pAdvertising->setMinPreferred(0x0); // set value to 0x00 to not advertise this parameter
-  BLEDevice::startAdvertising();
+  pAdvertising->addServiceUUID(pService->getUUID());
+  pAdvertising->setName(DEVICE_NAME);
+  pAdvertising->enableScanResponse(false);
+  pAdvertising->setAppearance(0x00);
+  pAdvertising->start();
   Serial.println("Waiting a client connection to notify...");
 }
 
@@ -133,42 +140,15 @@ void ble_loop()
   unsigned long currentMs = millis();
   if (deviceConnected)
   {
-    // connecting (set device state)
-    if (!oldDeviceConnected)
+    // only update once every BLE_DATA_INTERVAL_MS
+    if (currentMs - blePreviousDataIntervalMs >= BLE_DATA_INTERVAL_MS)
     {
-      // do stuff here on connecting
-      oldDeviceConnected = deviceConnected;
-      Serial.println("Device Connected");
-    }
-    else
-    {
-      // bluetooth stack will go into congestion if too many packets are sent,
-      // in 6 hours test i was able to go as low as 3ms
-      if (currentMs - blePreviousDataIntervalMs >= BLE_DATA_INTERVAL_MS)
-      {
-        // notify changed value
-        pSensorCharacteristic->setValue(String(z_acc).c_str());
-        pSensorCharacteristic->notify();
-        Serial.print("New value notified: ");
-        Serial.println(z_acc);
-        blePreviousDataIntervalMs = currentMs;
-      }
-    }
-  }
-  else
-  {
-    // disconnecting (unset device state)
-    if (oldDeviceConnected)
-    {
-      // give the bluetooth stack the chance to get things ready
-      if (currentMs - blePreviousResetMs >= BLE_RESET_MS)
-      {
-        Serial.println("Device disconnected.");
-        pServer->startAdvertising(); // restart advertising
-        Serial.println("Start advertising");
-        oldDeviceConnected = deviceConnected;
-        blePreviousResetMs = currentMs;
-      }
+      // notify changed value
+      pSensorCharacteristic->setValue(String(z_acc).c_str());
+      pSensorCharacteristic->notify();
+      Serial.print("New value notified: ");
+      Serial.println(z_acc);
+      blePreviousDataIntervalMs = currentMs;
     }
   }
 }
