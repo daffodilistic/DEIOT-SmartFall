@@ -1,3 +1,7 @@
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <PubSubClient.h>
@@ -12,9 +16,18 @@
 #define FALL_ACCELERATION_G 2
 #define MQTT_ENDPOINT "broker.emqx.io"
 #define MQTT_PORTNUM 1883
+#define SERVICE_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
+#define SENSOR_CHARACTERISTIC_UUID "19b10001-e8f2-537e-4f6c-d104768a1214"
+#define LED_CHARACTERISTIC_UUID "19b10002-e8f2-537e-4f6c-d104768a1214"
+#define BLE_RESET_MS 500
+#define BLE_DATA_INTERVAL_MS 3000
+#define FALL_LED_FLASH_INTERVAL_MS 500
 
 unsigned long previousMs = 0;
 unsigned long ledPreviousMs = 0;
+unsigned long blePreviousResetMs = 0;
+unsigned long blePreviousDataIntervalMs = 0;
+float z_acc = 0.0f;
 bool ledRedOn = false;
 bool hasFallen = false;
 char* WIFI_SSID = "Wokwi-GUEST";
@@ -24,8 +37,141 @@ char MQTT_CLIENT_NAME[32] = "SmartFall_";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+
+BLEServer *pServer = NULL;
+BLECharacteristic *pSensorCharacteristic = NULL;
+BLECharacteristic *pLedCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
 // Adafruit_MPU6050 mpu;
 // sensors_event_t acc, gcc, temp;
+
+class MyServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    deviceConnected = true;
+  };
+
+  void onDisconnect(BLEServer *pServer)
+  {
+    deviceConnected = false;
+  }
+};
+
+class MyCharacteristicCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pLedCharacteristic)
+  {
+    std::string value = pLedCharacteristic->getValue();
+    if (value.length() > 0)
+    {
+      Serial.print("Characteristic event, written: ");
+      Serial.println(static_cast<int>(value[0])); // Print the integer value
+
+      int receivedValue = static_cast<int>(value[0]);
+      if (receivedValue == 1)
+      {
+        digitalWrite(LED_PIN_RED, LOW);
+      }
+      else
+      {
+        digitalWrite(LED_PIN_RED, HIGH);
+      }
+    }
+  }
+};
+
+void ble_setup()
+{
+  // Create the BLE Device
+  BLEDevice::init("ESP32");
+
+  // Create the BLE Server
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  // Create the BLE Service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Create a BLE Characteristic
+  pSensorCharacteristic = pService->createCharacteristic(
+      SENSOR_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE |
+          BLECharacteristic::PROPERTY_NOTIFY |
+          BLECharacteristic::PROPERTY_INDICATE);
+
+  // Create the ON button Characteristic
+  pLedCharacteristic = pService->createCharacteristic(
+      LED_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_WRITE);
+
+  // Register the callback for the ON button characteristic
+  pLedCharacteristic->setCallbacks(new MyCharacteristicCallbacks());
+
+  // https://www.bluetooth.com/specifications/gatt/viewer?attributeXmlFile=org.bluetooth.descriptor.gatt.client_characteristic_configuration.xml
+  // Create a BLE Descriptor
+  pSensorCharacteristic->addDescriptor(new BLE2902());
+  pLedCharacteristic->addDescriptor(new BLE2902());
+
+  // Start the service
+  pService->start();
+
+  // Start advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(false);
+  pAdvertising->setMinPreferred(0x0); // set value to 0x00 to not advertise this parameter
+  BLEDevice::startAdvertising();
+  Serial.println("Waiting a client connection to notify...");
+}
+
+void ble_loop()
+{
+  unsigned long currentMs = millis();
+  if (deviceConnected)
+  {
+    // connecting (set device state)
+    if (!oldDeviceConnected)
+    {
+      // do stuff here on connecting
+      oldDeviceConnected = deviceConnected;
+      Serial.println("Device Connected");
+    }
+    else
+    {
+      // bluetooth stack will go into congestion if too many packets are sent,
+      // in 6 hours test i was able to go as low as 3ms
+      if (currentMs - blePreviousDataIntervalMs >= BLE_DATA_INTERVAL_MS)
+      {
+        // notify changed value
+        pSensorCharacteristic->setValue(String(z_acc).c_str());
+        pSensorCharacteristic->notify();
+        Serial.print("New value notified: ");
+        Serial.println(z_acc);
+        blePreviousDataIntervalMs = currentMs;
+      }
+    }
+  }
+  else
+  {
+    // disconnecting (unset device state)
+    if (oldDeviceConnected)
+    {
+      // give the bluetooth stack the chance to get things ready
+      if (currentMs - blePreviousResetMs >= BLE_RESET_MS)
+      {
+        Serial.println("Device disconnected.");
+        pServer->startAdvertising(); // restart advertising
+        Serial.println("Start advertising");
+        oldDeviceConnected = deviceConnected;
+        blePreviousResetMs = currentMs;
+      }
+    }
+  }
+}
 
 void led_flash(unsigned long currentMs)
 {
@@ -238,6 +384,7 @@ void setup()
   mpu_setup();
   wifi_setup();
   mqtt_setup();
+  ble_setup();
 
   unsigned long initTime = millis() - startTime;
   Serial.print("Finished setup in ");
@@ -255,12 +402,14 @@ void loop()
   }
   client.loop();
 
+  ble_loop();
+
   unsigned long currentMs = millis();
   if (hasFallen == false)
   {
     if (currentMs - previousMs >= FALL_DETECTION_MS)
     {
-      float z_acc = mpu_get_acceleration_z();
+      z_acc = mpu_get_acceleration_z();
       if (z_acc >= FALL_ACCELERATION_G)
       {
         char buffer[256];
