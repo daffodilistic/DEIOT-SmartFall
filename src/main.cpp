@@ -23,7 +23,7 @@
 unsigned long previousMs = 0;
 unsigned long ledPreviousMs = 0;
 unsigned long blePreviousDataIntervalMs = 0;
-float z_acc = 0.0f;
+float accelerationZ = 0.0f;
 bool ledRedOn = false;
 bool hasFallen = false;
 bool deviceConnected = false;
@@ -32,8 +32,7 @@ char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
 char MQTT_CLIENT_NAME[32] = "SmartFall_";
 
-WiFiClient espClient;
-PubSubClient client(espClient);
+PubSubClient *pPubSubClient = NULL;
 NimBLEServer *pServer = NULL;
 NimBLECharacteristic *pLedCharacteristic = NULL;
 NimBLECharacteristic *pSensorCharacteristic = NULL;
@@ -144,10 +143,10 @@ void ble_loop()
     if (currentMs - blePreviousDataIntervalMs >= BLE_DATA_INTERVAL_MS)
     {
       // notify changed value
-      pSensorCharacteristic->setValue(String(z_acc).c_str());
+      pSensorCharacteristic->setValue(String(accelerationZ).c_str());
       pSensorCharacteristic->notify();
       Serial.print("New value notified: ");
-      Serial.println(z_acc);
+      Serial.println(accelerationZ);
       blePreviousDataIntervalMs = currentMs;
     }
   }
@@ -198,18 +197,18 @@ void mqtt_generateClientName()
 
 void mqtt_connect()
 {
-  while (!client.connected())
+  while (!pPubSubClient->connected())
   {
     Serial.println("Connecting to MQTT ...");
-    if (client.connect(MQTT_CLIENT_NAME)) //, mqttUser, mqttPassword) )
+    if (pPubSubClient->connect(MQTT_CLIENT_NAME)) //, mqttUser, mqttPassword) )
     {
       Serial.println("Connected");
-      client.subscribe(MQTT_DEFAULT_TOPIC);
+      pPubSubClient->subscribe(MQTT_DEFAULT_TOPIC);
     }
     else
     {
       Serial.print("Failed with state ");
-      Serial.println(client.state());
+      Serial.println(pPubSubClient->state());
       delay(2000);
     }
   }
@@ -219,18 +218,20 @@ void mqtt_publish(char *topic, char *payload)
 {
   char buffer[256];
   sprintf(buffer, "%s", payload);
-  client.publish(topic, buffer);
+  pPubSubClient->publish(topic, buffer);
 }
 
 void mqtt_setup()
 {
   mqtt_generateClientName();
-  client.setServer(MQTT_ENDPOINT, MQTT_PORTNUM);
+  WiFiClient wifiClient;
+  pPubSubClient = new PubSubClient(wifiClient);
+  pPubSubClient->setServer(MQTT_ENDPOINT, MQTT_PORTNUM);
 }
 
 float mpu_get_acceleration_z()
 {
-  float z_accel = 0.0f;
+  float accelerationZel = 0.0f;
   // TODO should calibrate and use big data/ML to detect a fall!
   // mpu.getEvent(&acc, &gcc, &temp);
 
@@ -241,7 +242,7 @@ float mpu_get_acceleration_z()
   if (imu_update)
   {
     auto data = M5.Imu.getImuData();
-    z_accel = data.accel.z;
+    accelerationZel = data.accel.z;
     // char buffer[64];
     // sprintf(buffer, "ax:%f  ay:%f  az:%f", data.accel.x, data.accel.y, data.accel.z);
     // Serial.println(buffer);
@@ -251,7 +252,7 @@ float mpu_get_acceleration_z()
     M5.update();
   }
 
-  return z_accel;
+  return accelerationZel;
 }
 
 void mpu_setup()
@@ -301,6 +302,13 @@ void mpu_setup()
   //     delay(20);
   //   }
   // }
+}
+
+void tft_setup()
+{
+  M5.Display.setRotation(3);
+  M5.Display.setColor(255, 0, 255);
+  M5.Display.fillRect(0, 0, 160, 80);
 }
 
 void display_ok()
@@ -361,9 +369,10 @@ void setup()
   pinMode(LED_PIN_RED, OUTPUT);
   digitalWrite(LED_PIN_RED, HIGH);
 
+  tft_setup();
   mpu_setup();
-  wifi_setup();
-  mqtt_setup();
+  // wifi_setup();
+  // mqtt_setup();
   ble_setup();
 
   unsigned long initTime = millis() - startTime;
@@ -376,11 +385,14 @@ void setup()
 
 void loop()
 {
-  if (!client.connected())
+  if (pPubSubClient != NULL)
   {
-    mqtt_connect();
+    if (!pPubSubClient->connected())
+    {
+      mqtt_connect();
+    }
+    pPubSubClient->loop();
   }
-  client.loop();
 
   ble_loop();
 
@@ -389,11 +401,11 @@ void loop()
   {
     if (currentMs - previousMs >= FALL_DETECTION_MS)
     {
-      z_acc = mpu_get_acceleration_z();
-      if (z_acc >= FALL_ACCELERATION_G)
+      accelerationZ = mpu_get_acceleration_z();
+      if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];
-        sprintf(buffer, "%s,EVENT_FALL,%f", MQTT_CLIENT_NAME, z_acc);
+        sprintf(buffer, "%s,EVENT_FALL,%f", MQTT_CLIENT_NAME, accelerationZ);
         Serial.println(buffer);
         mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
 
