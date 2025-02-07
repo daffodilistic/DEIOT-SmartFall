@@ -8,6 +8,7 @@
     <meta name="color-scheme" content="light dark">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.colors.min.css">
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <meta charset="UTF-8">
 </head>
 
@@ -74,6 +75,29 @@
                     </div>
                 </article>
             </div>
+            <article class="mqtt">
+                <div>
+                    <h2 style="text-align: center">MQTT Broker</h2>
+                    <input type="text" id="mqttBrokerInput" name="mqttBroker" placeholder="broker.emqx.io">
+                    <div class="grid">
+                        <div>
+                            <button id="connectMqttButton"
+                                class="connectButton container-fluid pico-background-jade-350">Connect to
+                                MQTT Broker</button>
+                        </div>
+                        <div>
+                            <button id="disconnectMqttButton"
+                                class="disconnectButton container-fluid pico-background-red-450"> Disconnect
+                                MQTT Broker</button>
+                        </div>
+                    </div>
+                    <p
+                        style="text-align: center; margin-bottom: 0 !important; margin-top: var(--pico-typography-spacing-vertical);">
+                        MQTT state:
+                        <strong><span id="mqttState" style="color:#d13a30;">Disconnected</span></strong>
+                    </p>
+                </div>
+            </article>
         </div>
     </main>
 </body>
@@ -87,14 +111,24 @@
     const latestValueSent = document.getElementById('valueSent');
     const bleStateContainer = document.getElementById('bleState');
     const timestampContainer = document.getElementById('timestamp');
+    const mqttBroker = document.getElementById('mqttBrokerInput');
+    const mqttConnectButton = document.getElementById('connectMqttButton');
+    const mqttDisconnectButton = document.getElementById('disconnectMqttButton');
+    const mqttStateContainer = document.getElementById('mqttState');
 
-    //Define BLE Device Specs
+    // Pre-fill MQTT broker
+    mqttBroker.value = "broker.emqx.io";
+    // Global Variables to Handle MQTT
+    const mqttTopic = "DEIOT/SmartFall";
+    var mqttClient = null;
+
+    // Define BLE Device Specs
     var deviceName = 'ESP32';
     var bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
     var ledCharacteristic = '19b10002-e8f2-537e-4f6c-d104768a1214';
     var sensorCharacteristic = '19b10001-e8f2-537e-4f6c-d104768a1214';
 
-    //Global Variables to Handle Bluetooth
+    // Global Variables to Handle Bluetooth
     var bleServer;
     var bleServiceFound;
     var sensorCharacteristicFound;
@@ -112,6 +146,10 @@
     // Write to the ESP32 LED Characteristic
     onButton.addEventListener('click', () => writeOnCharacteristic(1));
     offButton.addEventListener('click', () => writeOnCharacteristic(0));
+
+    // Connect to MQTT Broker
+    mqttConnectButton.addEventListener('click', connectMqttBroker);
+    mqttDisconnectButton.addEventListener('click', disconnectMqttBroker);
 
     // Check if BLE is available in your Browser
     function isWebBluetoothEnabled() {
@@ -180,6 +218,7 @@
         console.log("Characteristic value changed: ", newValueReceived);
         retrievedValue.innerHTML = newValueReceived;
         timestampContainer.innerHTML = getDateTime();
+        sendMqttMessage(newValueReceived);
     }
 
     function writeOnCharacteristic(value) {
@@ -244,6 +283,61 @@
         return datetime;
     }
 
+    function connectMqttBroker() {
+        if (mqttBroker.value) {
+            mqttStateContainer.innerHTML = "Connecting to MQTT Broker...";
+            mqttStateContainer.style.color = "#FFBF00";
+
+            mqttClient = mqtt.connect(`wss://${mqttBroker.value}:8084/mqtt`);
+            if (mqttClient != null) {
+                initMqttClient(mqttClient);
+            }
+        } else {
+            console.error("MQTT Broker not defined.");
+            window.alert("MQTT Broker not defined. Please enter a valid MQTT Broker.");
+        }
+    }
+
+    function disconnectMqttBroker() {
+        if (mqttClient) {
+            mqttClient.end();
+            mqttStateContainer.innerHTML = "Disconnected from MQTT Broker";
+            mqttStateContainer.style.color = "#d13a30";
+        } else {
+            console.error("MQTT Client not connected.");
+            window.alert("MQTT Client not connected.");
+        }
+    }
+
+    function initMqttClient() {
+        mqttClient.on("connect", () => {
+            mqttStateContainer.innerHTML = "Connected to MQTT Broker";
+            mqttStateContainer.style.color = "#24af37";
+
+            mqttClient.subscribe(mqttTopic, (err) => {
+                if (!err) {
+                    mqttClient.publish(mqttTopic, "SmartFall_WebClient,EVENT_CONNECT,0");
+                }
+            });
+        });
+        mqttClient.on("message", (topic, message) => {
+            // message is Buffer
+            console.log(message.toString());
+        });
+    }
+
+    function sendMqttMessage(value) {
+        const gValue = Math.abs(parseFloat(value));
+        if (gValue > 1.5) {
+            if (mqttClient) {
+                console.log("Sending MQTT Message: ", value);
+                mqttClient.publish(mqttTopic, `SmartFall_WebClient,EVENT_SENSOR,${value}`);
+            } else {
+                console.error("MQTT Client not connected.");
+                window.alert("MQTT Client not connected.");
+            }
+        }
+    }
 
 </script>
 
