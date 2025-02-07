@@ -216,6 +216,10 @@ void mqtt_connect()
 
 void mqtt_publish(char *topic, char *payload)
 {
+  if (pPubSubClient == NULL)
+  {
+    return;
+  }
   char buffer[256];
   sprintf(buffer, "%s", payload);
   pPubSubClient->publish(topic, buffer);
@@ -401,7 +405,7 @@ void loop()
   {
     if (currentMs - previousMs >= FALL_DETECTION_MS)
     {
-      accelerationZ = mpu_get_acceleration_z();
+      accelerationZ = abs(mpu_get_acceleration_z());
       if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];
