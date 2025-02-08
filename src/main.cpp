@@ -7,8 +7,9 @@
 
 #define PIN_LED_RED 10
 #define PIN_ANALOG 34
-// #define PIN_BUTTON_A 37 // Front button
+#define PIN_BUTTON_A 37 // Front button
 // #define PIN_BUTTON_B 39 // Side button
+#define CANCEL_DURATION_MS 5000
 #define FALL_LED_FLASH_INTERVAL_MS 500
 #define FALL_ALARM_DURATION_MS 10000
 #define FALL_DETECTION_MS 500
@@ -28,6 +29,8 @@ float accelerationZ = 0.0f;
 bool ledRedOn = false;
 bool hasFallen = false;
 bool deviceConnected = false;
+bool cancelFallAlarm = false;
+bool isShowingCancel = false;
 char* WIFI_SSID = "Wokwi-GUEST";
 char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
@@ -231,9 +234,9 @@ void mqtt_publish(char *topic, char *payload)
 void mqtt_setup()
 {
   mqtt_generateClientName();
-  WiFiClient* wifiClient = new WiFiClient();
+  WiFiClient *wifiClient = new WiFiClient();
   pWiFiClient = wifiClient;
-  PubSubClient* mqttClient = new PubSubClient(*pWiFiClient);
+  PubSubClient *mqttClient = new PubSubClient(*pWiFiClient);
   pPubSubClient = mqttClient;
   pPubSubClient->setServer(MQTT_ENDPOINT, MQTT_PORTNUM);
 }
@@ -352,6 +355,22 @@ void display_fall()
   M5.Display.print("FALL");
 }
 
+void display_cancel()
+{
+  lgfx::v1::TextStyle ts = lgfx::v1::TextStyle();
+  ts.back_rgb888 = 0xFFFF00;
+  ts.fore_rgb888 = 0x000000;
+  // 0 = 270 deg / 1 = normal / 2 = 90 deg / 3 = 180 deg / 4~7 = upside down
+  M5.Display.setRotation(3);
+  M5.Display.setColor(255, 255, 0);
+  M5.Display.fillRect(0, 0, 160, 80);
+  M5.Display.setCursor(80 - (26 / 2 * 5), 40 - (26 / 2));
+  // From https://m5stack.lang-ship.com/howto/m5gfx/font/
+  M5.Display.setFont(&fonts::Font4);
+  M5.Display.setTextStyle(ts);
+  M5.Display.print("RESET");
+}
+
 void wifi_setup()
 {
   Serial.print("Connecting to Wi-Fi ...");
@@ -378,10 +397,12 @@ void setup()
   pinMode(PIN_LED_RED, OUTPUT);
   digitalWrite(PIN_LED_RED, HIGH);
 
+  pinMode(PIN_BUTTON_A, INPUT);
+
   tft_setup();
   mpu_setup();
-  // wifi_setup();
-  // mqtt_setup();
+  wifi_setup();
+  mqtt_setup();
   ble_setup();
 
   unsigned long initTime = millis() - startTime;
@@ -428,16 +449,49 @@ void loop()
   }
   else
   {
-    if (currentMs - previousMs <= FALL_ALARM_DURATION_MS)
+    bool isButtonPressed = digitalRead(PIN_BUTTON_A) != HIGH;
+    if (isButtonPressed && cancelFallAlarm == false)
     {
-      led_flash(currentMs);
+      char buffer[256];
+      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", MQTT_CLIENT_NAME, 0);
+      Serial.println(buffer);
+      mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
+      cancelFallAlarm = true;
+    }
+
+    if (cancelFallAlarm == false)
+    {
+      if (currentMs - previousMs <= FALL_ALARM_DURATION_MS)
+      {
+        led_flash(currentMs);
+      }
+      else
+      {
+        digitalWrite(PIN_LED_RED, HIGH);
+        previousMs = currentMs;
+        hasFallen = false;
+        display_ok();
+      }
     }
     else
     {
       digitalWrite(PIN_LED_RED, HIGH);
-      previousMs = currentMs;
-      hasFallen = false;
-      display_ok();
+      if (currentMs - previousMs <= CANCEL_DURATION_MS)
+      {
+        if (isShowingCancel == false)
+        {
+          isShowingCancel = true;
+          display_cancel();
+        }
+      }
+      else
+      {
+        previousMs = currentMs;
+        isShowingCancel = false;
+        cancelFallAlarm = false;
+        hasFallen = false;
+        display_ok();
+      }
     }
   }
 
