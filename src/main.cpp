@@ -5,20 +5,21 @@
 #include "M5Unified.h"
 // #include <Adafruit_MPU6050.h>
 
-#define LED_PIN_RED 10
-#define ANALOG_PIN 34
+#define PIN_LED_RED 10
+#define PIN_ANALOG 34
+// #define PIN_BUTTON_A 37 // Front button
+// #define PIN_BUTTON_B 39 // Side button
 #define FALL_LED_FLASH_INTERVAL_MS 500
 #define FALL_ALARM_DURATION_MS 10000
 #define FALL_DETECTION_MS 500
 #define FALL_ACCELERATION_G 2
 #define MQTT_ENDPOINT "broker.emqx.io"
 #define MQTT_PORTNUM 1883
-#define DEVICE_NAME "ESP32"
-#define SERVICE_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
-#define SENSOR_CHARACTERISTIC_UUID "19b10001-e8f2-537e-4f6c-d104768a1214"
-#define LED_CHARACTERISTIC_UUID "19b10002-e8f2-537e-4f6c-d104768a1214"
+#define BLE_DEVICE_NAME "ESP32"
+#define BLE_SERVICE_UUID "19b10000-e8f2-537e-4f6c-d104768a1214"
+#define BLE_SENSOR_CHARACTERISTIC_UUID "19b10001-e8f2-537e-4f6c-d104768a1214"
+#define BLE_LED_CHARACTERISTIC_UUID "19b10002-e8f2-537e-4f6c-d104768a1214"
 #define BLE_DATA_INTERVAL_MS 500
-#define FALL_LED_FLASH_INTERVAL_MS 500
 
 unsigned long previousMs = 0;
 unsigned long ledPreviousMs = 0;
@@ -32,7 +33,9 @@ char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
 char MQTT_CLIENT_NAME[32] = "SmartFall_";
 
+WiFiClient *pWiFiClient = NULL;
 PubSubClient *pPubSubClient = NULL;
+
 NimBLEServer *pServer = NULL;
 NimBLECharacteristic *pLedCharacteristic = NULL;
 NimBLECharacteristic *pSensorCharacteristic = NULL;
@@ -81,11 +84,11 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
       int receivedValue = static_cast<int>(value[0]);
       if (receivedValue == 1)
       {
-        digitalWrite(LED_PIN_RED, LOW);
+        digitalWrite(PIN_LED_RED, LOW);
       }
       else
       {
-        digitalWrite(LED_PIN_RED, HIGH);
+        digitalWrite(PIN_LED_RED, HIGH);
       }
     }
   }
@@ -94,7 +97,7 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
 void ble_setup()
 {
   // Create the BLE Device
-  NimBLEDevice::init(DEVICE_NAME);
+  NimBLEDevice::init(BLE_DEVICE_NAME);
 
   // NimBLEDevice::setSecurityAuth(false, false, false);
   // Create the BLE Server
@@ -103,11 +106,11 @@ void ble_setup()
   pServer->advertiseOnDisconnect(true);
 
   // Create the BLE Service
-  NimBLEService *pService = pServer->createService(SERVICE_UUID);
+  NimBLEService *pService = pServer->createService(BLE_SERVICE_UUID);
 
   // Create a BLE Characteristic
   pSensorCharacteristic = pService->createCharacteristic(
-      SENSOR_CHARACTERISTIC_UUID,
+      BLE_SENSOR_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::NOTIFY |
@@ -115,7 +118,7 @@ void ble_setup()
 
   // Create the ON button Characteristic
   pLedCharacteristic = pService->createCharacteristic(
-      LED_CHARACTERISTIC_UUID,
+      BLE_LED_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::WRITE);
 
   // Register the callback for the ON button characteristic
@@ -127,7 +130,7 @@ void ble_setup()
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->setName(DEVICE_NAME);
+  pAdvertising->setName(BLE_DEVICE_NAME);
   pAdvertising->enableScanResponse(false);
   pAdvertising->setAppearance(0x00);
   pAdvertising->start();
@@ -164,18 +167,18 @@ void led_flash(unsigned long currentMs)
 
   if (ledRedOn)
   {
-    digitalWrite(LED_PIN_RED, LOW);
+    digitalWrite(PIN_LED_RED, LOW);
   }
   else
   {
-    digitalWrite(LED_PIN_RED, HIGH);
+    digitalWrite(PIN_LED_RED, HIGH);
   }
 }
 
 void mqtt_generateClientName()
 {
   char *buffer = &MQTT_CLIENT_NAME[10];
-  randomSeed(analogRead(ANALOG_PIN));
+  randomSeed(analogRead(PIN_ANALOG));
   for (int i = 0; i < 12; i++)
   {
     bool isNumber = random(0, 2);
@@ -228,8 +231,10 @@ void mqtt_publish(char *topic, char *payload)
 void mqtt_setup()
 {
   mqtt_generateClientName();
-  WiFiClient wifiClient;
-  pPubSubClient = new PubSubClient(wifiClient);
+  WiFiClient* wifiClient = new WiFiClient();
+  pWiFiClient = wifiClient;
+  PubSubClient* mqttClient = new PubSubClient(*pWiFiClient);
+  pPubSubClient = mqttClient;
   pPubSubClient->setServer(MQTT_ENDPOINT, MQTT_PORTNUM);
 }
 
@@ -370,8 +375,8 @@ void setup()
   Serial.begin(9600);
   Serial.println("Hello, ESP32!");
 
-  pinMode(LED_PIN_RED, OUTPUT);
-  digitalWrite(LED_PIN_RED, HIGH);
+  pinMode(PIN_LED_RED, OUTPUT);
+  digitalWrite(PIN_LED_RED, HIGH);
 
   tft_setup();
   mpu_setup();
@@ -429,7 +434,7 @@ void loop()
     }
     else
     {
-      digitalWrite(LED_PIN_RED, HIGH);
+      digitalWrite(PIN_LED_RED, HIGH);
       previousMs = currentMs;
       hasFallen = false;
       display_ok();
