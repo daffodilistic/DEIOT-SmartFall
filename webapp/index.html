@@ -322,6 +322,7 @@
                     mqttClient.publish(mqttTopic, "SmartFall_WebClient,EVENT_CONNECT,0");
                     // Send data to Firebase Functions
                     const jsonData = {
+                        "timestamp": Date.now(),
                         "device": "SmartFall_WebClient",
                         "event": "EVENT_CONNECT",
                         "value": 0
@@ -343,6 +344,7 @@
                 console.log("Sending MQTT Message: ", value);
                 mqttClient.publish(mqttTopic, `SmartFall_WebClient,EVENT_SENSOR,${value}`);
                 sendFirebaseData({
+                    "timestamp": Date.now(),
                     "device": "SmartFall_WebClient",
                     "event": "EVENT_FALL",
                     "value": gValue
