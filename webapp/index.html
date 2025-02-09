@@ -221,12 +221,7 @@
         console.log("Characteristic value changed: ", newValueReceived);
         retrievedValue.innerHTML = newValueReceived;
         timestampContainer.innerHTML = getDateTime();
-        sendMqttMessage(newValueReceived);
-        sendFirebaseData({
-            "device": "SmartFall_WebClient",
-            "event": "EVENT_FALL",
-            "value": newValueReceived
-        });
+        detectFall(newValueReceived);
     }
 
     function writeOnCharacteristic(value) {
@@ -341,12 +336,17 @@
         });
     }
 
-    function sendMqttMessage(value) {
+    function detectFall(value) {
         const gValue = Math.abs(parseFloat(value));
         if (gValue > 1.5) {
             if (mqttClient) {
                 console.log("Sending MQTT Message: ", value);
                 mqttClient.publish(mqttTopic, `SmartFall_WebClient,EVENT_SENSOR,${value}`);
+                sendFirebaseData({
+                    "device": "SmartFall_WebClient",
+                    "event": "EVENT_FALL",
+                    "value": newValueReceived
+                });
             } else {
                 console.error("MQTT Client not connected.");
                 window.alert("MQTT Client not connected.");
