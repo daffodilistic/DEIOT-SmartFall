@@ -122,6 +122,9 @@
     const mqttTopic = "DEIOT/SmartFall";
     var mqttClient = null;
 
+    // API endpoint to send data to Firebase Functions
+    const firebaseFunctionUrl = 'https://127.0.0.1:5001/smartfall-iot/us-central1/sendData';
+
     // Define BLE Device Specs
     var deviceName = 'ESP32';
     var bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
@@ -219,6 +222,11 @@
         retrievedValue.innerHTML = newValueReceived;
         timestampContainer.innerHTML = getDateTime();
         sendMqttMessage(newValueReceived);
+        sendFirebaseData({
+            "device": "SmartFall_WebClient",
+            "event": "EVENT_FALL",
+            "value": newValueReceived
+        });
     }
 
     function writeOnCharacteristic(value) {
@@ -317,6 +325,13 @@
             mqttClient.subscribe(mqttTopic, (err) => {
                 if (!err) {
                     mqttClient.publish(mqttTopic, "SmartFall_WebClient,EVENT_CONNECT,0");
+                    // Send data to Firebase Functions
+                    const jsonData = {
+                        "device": "SmartFall_WebClient",
+                        "event": "EVENT_CONNECT",
+                        "value": 0
+                    };
+                    sendFirebaseData(jsonData);
                 }
             });
         });
@@ -339,6 +354,22 @@
         }
     }
 
+    function sendFirebaseData(data) {
+        fetch(firebaseFunctionUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data),
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Success:', data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+    }
 </script>
 
 </html>
