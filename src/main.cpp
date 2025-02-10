@@ -132,7 +132,6 @@ void ble_setup()
   pForceCharacteristic = pService->createCharacteristic(
       BLE_UUID_SENSOR_CHARACTERISTIC,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::NOTIFY |
           NIMBLE_PROPERTY::INDICATE);
 
