@@ -16,10 +16,10 @@
 #define FALL_ACCELERATION_G 2
 #define MQTT_ENDPOINT "broker.emqx.io"
 #define MQTT_PORTNUM 1883
-#define BLE_DEVICE_NAME_UUID "2A00"
-#define BLE_SERVICE_UUID "1840"
-#define BLE_SENSOR_CHARACTERISTIC_UUID "2C07"
-#define BLE_LED_CHARACTERISTIC_UUID "2BE2"
+#define BLE_UUID_SERVICE "1840"               // Generic Health Sensor Service
+#define BLE_UUID_DEVICE_CHARACTERISTIC "2A00" // Device Name
+#define BLE_UUID_SENSOR_CHARACTERISTIC "2C07" // Force
+#define BLE_UUID_LED_CHARACTERISTIC "2BE2"    // Light Output
 #define BLE_DATA_INTERVAL_MS 500
 
 unsigned long previousMs = 0;
@@ -34,14 +34,16 @@ bool isShowingCancel = false;
 char* WIFI_SSID = "Wokwi-GUEST";
 char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
-char DEVICE_NAME_MAC[32] = "ESP32";
+char DEVICE_ID[32] = "SmartFall_";
+char DEVICE_NAME[32] = "ESP32";
 
 WiFiClient *pWiFiClient = NULL;
 PubSubClient *pPubSubClient = NULL;
 
 NimBLEServer *pServer = NULL;
-NimBLECharacteristic *pLedCharacteristic = NULL;
-NimBLECharacteristic *pSensorCharacteristic = NULL;
+NimBLECharacteristic *pLightOutputCharacteristic = NULL;
+NimBLECharacteristic *pForceCharacteristic = NULL;
+NimBLECharacteristic *pDeviceNameCharacteristic = NULL;
 
 // Adafruit_MPU6050 mpu;
 // sensors_event_t acc, gcc, temp;
@@ -76,31 +78,46 @@ class MyServerCallbacks : public NimBLEServerCallbacks
 
 class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
 {
-  void onWrite(NimBLECharacteristic *pLedCharacteristic, NimBLEConnInfo &connInfo) override
+  void onWrite(NimBLECharacteristic *bleCharacteristic, NimBLEConnInfo &connInfo) override
   {
-    std::string value = pLedCharacteristic->getValue();
-    if (value.length() > 0)
+    std::string uuid = bleCharacteristic->getUUID().toString();
+    if (uuid == BLE_UUID_LED_CHARACTERISTIC)
     {
-      Serial.print("Characteristic event, written: ");
-      Serial.println(static_cast<int>(value[0])); // Print the integer value
+      std::string value = bleCharacteristic->getValue();
+      if (value.length() > 0)
+      {
+        Serial.print("Characteristic event, written: ");
+        Serial.println(static_cast<int>(value[0])); // Print the integer value
 
-      int receivedValue = static_cast<int>(value[0]);
-      if (receivedValue == 1)
-      {
-        digitalWrite(PIN_LED_RED, LOW);
-      }
-      else
-      {
-        digitalWrite(PIN_LED_RED, HIGH);
+        int receivedValue = static_cast<int>(value[0]);
+        if (receivedValue == 1)
+        {
+          digitalWrite(PIN_LED_RED, LOW);
+        }
+        else
+        {
+          digitalWrite(PIN_LED_RED, HIGH);
+        }
       }
     }
+  }
+
+  void onRead(NimBLECharacteristic *bleCharacteristic, NimBLEConnInfo &connInfo) override
+  {
+    std::string uuid = bleCharacteristic->getUUID().toString();
+    Serial.println("Read request received for UUID: ");
+    // Serial.println(uuid.c_str());
+    // if (uuid == BLE_UUID_DEVICE_CHARACTERISTIC)
+    // {
+      
+    // }
   }
 } chrCallbacks;
 
 void ble_setup()
 {
   // Create the BLE Device
-  NimBLEDevice::init(DEVICE_NAME_MAC);
+  NimBLEDevice::init(DEVICE_NAME);
 
   // NimBLEDevice::setSecurityAuth(false, false, false);
   // Create the BLE Server
@@ -109,23 +126,29 @@ void ble_setup()
   pServer->advertiseOnDisconnect(true);
 
   // Create the BLE Service
-  NimBLEService *pService = pServer->createService(BLE_SERVICE_UUID);
+  NimBLEService *pService = pServer->createService(BLE_UUID_SERVICE);
 
-  // Create a BLE Characteristic
-  pSensorCharacteristic = pService->createCharacteristic(
-      BLE_SENSOR_CHARACTERISTIC_UUID,
+  // Create force Characteristic
+  pForceCharacteristic = pService->createCharacteristic(
+      BLE_UUID_SENSOR_CHARACTERISTIC,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::NOTIFY |
           NIMBLE_PROPERTY::INDICATE);
 
-  // Create the ON button Characteristic
-  pLedCharacteristic = pService->createCharacteristic(
-      BLE_LED_CHARACTERISTIC_UUID,
+  // Create light output Characteristic
+  pLightOutputCharacteristic = pService->createCharacteristic(
+      BLE_UUID_LED_CHARACTERISTIC,
       NIMBLE_PROPERTY::WRITE);
+  // Register the callback for the LED characteristic
+  pLightOutputCharacteristic->setCallbacks(&chrCallbacks);
 
-  // Register the callback for the ON button characteristic
-  pLedCharacteristic->setCallbacks(&chrCallbacks);
+  // Create device name Characteristic
+  pDeviceNameCharacteristic = pService->createCharacteristic(
+      BLE_UUID_DEVICE_CHARACTERISTIC,
+      NIMBLE_PROPERTY::READ);
+  pDeviceNameCharacteristic->setValue(DEVICE_ID);
+  pDeviceNameCharacteristic->setCallbacks(&chrCallbacks);
 
   // Start the service
   pService->start();
@@ -133,7 +156,7 @@ void ble_setup()
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->setName(DEVICE_NAME_MAC);
+  pAdvertising->setName(DEVICE_NAME);
   pAdvertising->enableScanResponse(false);
   pAdvertising->setAppearance(0x00);
   pAdvertising->start();
@@ -149,8 +172,8 @@ void ble_loop()
     if (currentMs - blePreviousDataIntervalMs >= BLE_DATA_INTERVAL_MS)
     {
       // notify changed value
-      pSensorCharacteristic->setValue(String(accelerationZ).c_str());
-      pSensorCharacteristic->notify();
+      pForceCharacteristic->setValue(String(accelerationZ).c_str());
+      pForceCharacteristic->notify();
       Serial.print("New value notified: ");
       Serial.println(accelerationZ);
       blePreviousDataIntervalMs = currentMs;
@@ -180,7 +203,7 @@ void led_flash(unsigned long currentMs)
 
 void mqtt_generateClientName()
 {
-  char *buffer = &DEVICE_NAME_MAC[10];
+  char *buffer = &DEVICE_ID[10];
   randomSeed(analogRead(PIN_ANALOG));
   for (int i = 0; i < 12; i++)
   {
@@ -196,9 +219,8 @@ void mqtt_generateClientName()
       buffer[i] = (char)random(65, 91);
     }
   }
-  //(DEVICE_NAME_MAC+1) = buffer[0];
   Serial.print("Generated client name is ");
-  Serial.println(DEVICE_NAME_MAC);
+  Serial.println(DEVICE_ID);
 }
 
 void mqtt_connect()
@@ -206,7 +228,7 @@ void mqtt_connect()
   while (!pPubSubClient->connected())
   {
     Serial.println("Connecting to MQTT ...");
-    if (pPubSubClient->connect(DEVICE_NAME_MAC)) //, mqttUser, mqttPassword) )
+    if (pPubSubClient->connect(DEVICE_ID)) //, mqttUser, mqttPassword) )
     {
       Serial.println("Connected");
       pPubSubClient->subscribe(MQTT_DEFAULT_TOPIC);
@@ -387,14 +409,14 @@ void client_name_setup()
 {
   uint8_t baseMac[6];
   char buffer[16];
-  
+
   esp_read_mac(baseMac, ESP_MAC_BT);
   sprintf(buffer, "%02X%02X%02X%02X%02X%02X\0", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
   // WARNING string must be null terminated!
-  strcat(DEVICE_NAME_MAC, buffer);
+  strcat(DEVICE_ID, buffer);
 
   Serial.print("Device name is ");
-  Serial.println(DEVICE_NAME_MAC);
+  Serial.println(DEVICE_ID);
 }
 
 void setup()
@@ -412,7 +434,7 @@ void setup()
 
   pinMode(PIN_BUTTON_A, INPUT);
 
-  // client_name_setup();
+  client_name_setup();
   tft_setup();
   mpu_setup();
   // wifi_setup();
@@ -449,7 +471,7 @@ void loop()
       if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];
-        sprintf(buffer, "%s,EVENT_FALL,%f", DEVICE_NAME_MAC, accelerationZ);
+        sprintf(buffer, "%s,EVENT_FALL,%f", DEVICE_NAME, accelerationZ);
         Serial.println(buffer);
         mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
 
@@ -467,7 +489,7 @@ void loop()
     if (isButtonPressed && cancelFallAlarm == false)
     {
       char buffer[256];
-      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", DEVICE_NAME_MAC, 0);
+      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", DEVICE_NAME, 0);
       Serial.println(buffer);
       mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
       cancelFallAlarm = true;
