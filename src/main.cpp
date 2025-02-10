@@ -16,7 +16,7 @@
 #define FALL_ACCELERATION_G 2
 #define MQTT_ENDPOINT "broker.emqx.io"
 #define MQTT_PORTNUM 1883
-#define BLE_DEVICE_NAME "ESP32"
+#define BLE_DEVICE_NAME_UUID "2A00"
 #define BLE_SERVICE_UUID "1840"
 #define BLE_SENSOR_CHARACTERISTIC_UUID "2C07"
 #define BLE_LED_CHARACTERISTIC_UUID "2BE2"
@@ -34,7 +34,7 @@ bool isShowingCancel = false;
 char* WIFI_SSID = "Wokwi-GUEST";
 char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
-char MQTT_CLIENT_NAME[32] = "SmartFall_";
+char DEVICE_NAME_MAC[32] = "SmartFall_";
 
 WiFiClient *pWiFiClient = NULL;
 PubSubClient *pPubSubClient = NULL;
@@ -100,7 +100,7 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
 void ble_setup()
 {
   // Create the BLE Device
-  NimBLEDevice::init(BLE_DEVICE_NAME);
+  NimBLEDevice::init(DEVICE_NAME_MAC);
 
   // NimBLEDevice::setSecurityAuth(false, false, false);
   // Create the BLE Server
@@ -133,7 +133,7 @@ void ble_setup()
   // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->setName(BLE_DEVICE_NAME);
+  pAdvertising->setName(DEVICE_NAME_MAC);
   pAdvertising->enableScanResponse(false);
   pAdvertising->setAppearance(0x00);
   pAdvertising->start();
@@ -180,7 +180,7 @@ void led_flash(unsigned long currentMs)
 
 void mqtt_generateClientName()
 {
-  char *buffer = &MQTT_CLIENT_NAME[10];
+  char *buffer = &DEVICE_NAME_MAC[10];
   randomSeed(analogRead(PIN_ANALOG));
   for (int i = 0; i < 12; i++)
   {
@@ -196,9 +196,9 @@ void mqtt_generateClientName()
       buffer[i] = (char)random(65, 91);
     }
   }
-  //(MQTT_CLIENT_NAME+1) = buffer[0];
+  //(DEVICE_NAME_MAC+1) = buffer[0];
   Serial.print("Generated client name is ");
-  Serial.println(MQTT_CLIENT_NAME);
+  Serial.println(DEVICE_NAME_MAC);
 }
 
 void mqtt_connect()
@@ -206,7 +206,7 @@ void mqtt_connect()
   while (!pPubSubClient->connected())
   {
     Serial.println("Connecting to MQTT ...");
-    if (pPubSubClient->connect(MQTT_CLIENT_NAME)) //, mqttUser, mqttPassword) )
+    if (pPubSubClient->connect(DEVICE_NAME_MAC)) //, mqttUser, mqttPassword) )
     {
       Serial.println("Connected");
       pPubSubClient->subscribe(MQTT_DEFAULT_TOPIC);
@@ -269,10 +269,6 @@ float mpu_get_acceleration_z()
 
 void mpu_setup()
 {
-  auto cfg = M5.config();
-  cfg.serial_baudrate = 9600;
-  M5.begin(cfg);
-
   const char *name;
   auto imu_type = M5.Imu.getType();
   // switch (imu_type)
@@ -387,10 +383,27 @@ void wifi_setup()
   Serial.println(WiFi.localIP());
 }
 
+void client_name_setup()
+{
+  uint8_t baseMac[6];
+  char buffer[16];
+  
+  esp_read_mac(baseMac, ESP_MAC_BT);
+  sprintf(buffer, "%02X%02X%02X%02X%02X%02X\0", baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
+  // WARNING string must be null terminated!
+  strcat(DEVICE_NAME_MAC, buffer);
+
+  Serial.print("Device name is ");
+  Serial.println(DEVICE_NAME_MAC);
+}
+
 void setup()
 {
   unsigned long startTime = millis();
-  // put your setup code here, to run once:
+  auto cfg = M5.config();
+  cfg.serial_baudrate = 9600;
+  M5.begin(cfg);
+
   Serial.begin(9600);
   Serial.println("Hello, ESP32!");
 
@@ -399,10 +412,11 @@ void setup()
 
   pinMode(PIN_BUTTON_A, INPUT);
 
+  client_name_setup();
   tft_setup();
   mpu_setup();
-  wifi_setup();
-  mqtt_setup();
+  // wifi_setup();
+  // mqtt_setup();
   ble_setup();
 
   unsigned long initTime = millis() - startTime;
@@ -435,7 +449,7 @@ void loop()
       if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];
-        sprintf(buffer, "%s,EVENT_FALL,%f", MQTT_CLIENT_NAME, accelerationZ);
+        sprintf(buffer, "%s,EVENT_FALL,%f", DEVICE_NAME_MAC, accelerationZ);
         Serial.println(buffer);
         mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
 
@@ -453,7 +467,7 @@ void loop()
     if (isButtonPressed && cancelFallAlarm == false)
     {
       char buffer[256];
-      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", MQTT_CLIENT_NAME, 0);
+      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", DEVICE_NAME_MAC, 0);
       Serial.println(buffer);
       mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
       cancelFallAlarm = true;
