@@ -126,10 +126,11 @@
     const firebaseFunctionUrl = 'https://127.0.0.1:5001/smartfall-iot/us-central1/sendData';
 
     // Define BLE Device Specs
+    // NOTE: Chrome detects the device as "ESP32", no idea why
     var deviceName = 'ESP32';
-    var bleService = '19b10000-e8f2-537e-4f6c-d104768a1214';
-    var ledCharacteristic = '19b10002-e8f2-537e-4f6c-d104768a1214';
-    var sensorCharacteristic = '19b10001-e8f2-537e-4f6c-d104768a1214';
+    var bleService = parseInt('0x1840');
+    var ledCharacteristic = parseInt('0x2BE2');
+    var sensorCharacteristic = parseInt('0x2C07');
 
     // Global Variables to Handle Bluetooth
     var bleServer;

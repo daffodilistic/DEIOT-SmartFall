@@ -34,7 +34,7 @@ bool isShowingCancel = false;
 char* WIFI_SSID = "Wokwi-GUEST";
 char* WIFI_PASSWORD = "";
 char MQTT_DEFAULT_TOPIC[] = "DEIOT/SmartFall";
-char DEVICE_NAME_MAC[32] = "SmartFall_";
+char DEVICE_NAME_MAC[32] = "ESP32";
 
 WiFiClient *pWiFiClient = NULL;
 PubSubClient *pPubSubClient = NULL;
@@ -412,7 +412,7 @@ void setup()
 
   pinMode(PIN_BUTTON_A, INPUT);
 
-  client_name_setup();
+  // client_name_setup();
   tft_setup();
   mpu_setup();
   // wifi_setup();
