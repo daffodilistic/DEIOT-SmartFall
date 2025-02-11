@@ -470,7 +470,7 @@ void loop()
       if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];
-        sprintf(buffer, "%s,EVENT_FALL,%f", DEVICE_NAME, accelerationZ);
+        sprintf(buffer, "%s,EVENT_FALL,%f", DEVICE_ID, accelerationZ);
         Serial.println(buffer);
         mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
 
@@ -488,7 +488,7 @@ void loop()
     if (isButtonPressed && cancelFallAlarm == false)
     {
       char buffer[256];
-      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", DEVICE_NAME, 0);
+      sprintf(buffer, "%s,EVENT_FALL_CANCEL,%f", DEVICE_ID, 0);
       Serial.println(buffer);
       mqtt_publish(MQTT_DEFAULT_TOPIC, buffer);
       cancelFallAlarm = true;
