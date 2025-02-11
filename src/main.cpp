@@ -80,8 +80,13 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
 {
   void onWrite(NimBLECharacteristic *bleCharacteristic, NimBLEConnInfo &connInfo) override
   {
-    std::string uuid = bleCharacteristic->getUUID().toString();
-    if (uuid == BLE_UUID_LED_CHARACTERISTIC)
+    int uuid = std::stoi(bleCharacteristic->getUUID().toString(), 0, 16);
+    int compare = std::stoi(BLE_UUID_LED_CHARACTERISTIC, 0, 16);
+    // Serial.print("UUID is: ");
+    // Serial.println(uuid);
+    // Serial.print("Comparison is: ");
+    // Serial.println(compare);
+    if (uuid == compare)
     {
       std::string value = bleCharacteristic->getValue();
       if (value.length() > 0)
