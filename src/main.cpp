@@ -109,10 +109,81 @@ class MyCharacteristicCallbacks : public NimBLECharacteristicCallbacks
     // Serial.println(uuid.c_str());
     // if (uuid == BLE_UUID_DEVICE_CHARACTERISTIC)
     // {
-      
+
     // }
   }
 } chrCallbacks;
+
+float mpu_get_acceleration_z()
+{
+  float accelerationZel = 0.0f;
+  // TODO should calibrate and use big data/ML to detect a fall!
+  // mpu.getEvent(&acc, &gcc, &temp);
+
+  // Serial.print("Z-axis acceleration: ");
+  // Serial.println(acc.acceleration.z);
+
+  auto imu_update = M5.Imu.update();
+  if (imu_update)
+  {
+    auto data = M5.Imu.getImuData();
+    accelerationZel = data.accel.z;
+    // char buffer[64];
+    // sprintf(buffer, "ax:%f  ay:%f  az:%f", data.accel.x, data.accel.y, data.accel.z);
+    // Serial.println(buffer);
+  }
+  else
+  {
+    M5.update();
+  }
+
+  return accelerationZel;
+}
+
+void mpu_setup()
+{
+  const char *name;
+  auto imu_type = M5.Imu.getType();
+  // switch (imu_type)
+  // {
+  // case m5::imu_none:
+  //   name = "not found";
+  //   break;
+  // case m5::imu_sh200q:
+  //   name = "sh200q";
+  //   break;
+  // case m5::imu_mpu6050:
+  //   name = "mpu6050";
+  //   break;
+  // case m5::imu_mpu6886:
+  //   name = "mpu6886";
+  //   break;
+  // case m5::imu_mpu9250:
+  //   name = "mpu9250";
+  //   break;
+  // case m5::imu_bmi270:
+  //   name = "bmi270";
+  //   break;
+  // default:
+  //   name = "unknown";
+  //   break;
+  // };
+  // M5_LOGI("imu:%s", name);
+
+  if (imu_type == m5::imu_none)
+  {
+    for (;;)
+    {
+      delay(1);
+    }
+  }
+
+  // if (!mpu.begin()) {
+  //   while (1) {
+  //     delay(20);
+  //   }
+  // }
+}
 
 void ble_setup()
 {
@@ -164,6 +235,7 @@ void ble_setup()
 
 void ble_loop()
 {
+  accelerationZ = abs(mpu_get_acceleration_z());
   unsigned long currentMs = millis();
   if (deviceConnected)
   {
@@ -260,77 +332,6 @@ void mqtt_setup()
   PubSubClient *mqttClient = new PubSubClient(*pWiFiClient);
   pPubSubClient = mqttClient;
   pPubSubClient->setServer(MQTT_ENDPOINT, MQTT_PORTNUM);
-}
-
-float mpu_get_acceleration_z()
-{
-  float accelerationZel = 0.0f;
-  // TODO should calibrate and use big data/ML to detect a fall!
-  // mpu.getEvent(&acc, &gcc, &temp);
-
-  // Serial.print("Z-axis acceleration: ");
-  // Serial.println(acc.acceleration.z);
-
-  auto imu_update = M5.Imu.update();
-  if (imu_update)
-  {
-    auto data = M5.Imu.getImuData();
-    accelerationZel = data.accel.z;
-    // char buffer[64];
-    // sprintf(buffer, "ax:%f  ay:%f  az:%f", data.accel.x, data.accel.y, data.accel.z);
-    // Serial.println(buffer);
-  }
-  else
-  {
-    M5.update();
-  }
-
-  return accelerationZel;
-}
-
-void mpu_setup()
-{
-  const char *name;
-  auto imu_type = M5.Imu.getType();
-  // switch (imu_type)
-  // {
-  // case m5::imu_none:
-  //   name = "not found";
-  //   break;
-  // case m5::imu_sh200q:
-  //   name = "sh200q";
-  //   break;
-  // case m5::imu_mpu6050:
-  //   name = "mpu6050";
-  //   break;
-  // case m5::imu_mpu6886:
-  //   name = "mpu6886";
-  //   break;
-  // case m5::imu_mpu9250:
-  //   name = "mpu9250";
-  //   break;
-  // case m5::imu_bmi270:
-  //   name = "bmi270";
-  //   break;
-  // default:
-  //   name = "unknown";
-  //   break;
-  // };
-  // M5_LOGI("imu:%s", name);
-
-  if (imu_type == m5::imu_none)
-  {
-    for (;;)
-    {
-      delay(1);
-    }
-  }
-
-  // if (!mpu.begin()) {
-  //   while (1) {
-  //     delay(20);
-  //   }
-  // }
 }
 
 void tft_setup()
@@ -466,7 +467,6 @@ void loop()
   {
     if (currentMs - previousMs >= FALL_DETECTION_MS)
     {
-      accelerationZ = abs(mpu_get_acceleration_z());
       if (accelerationZ >= FALL_ACCELERATION_G)
       {
         char buffer[256];

@@ -11,13 +11,13 @@ const webRequestConfig = {
 initializeApp();
 
 exports.addmessage = onRequest(webRequestConfig, async (req, res) => {
-    if (req.method !== "POST") {
-        res.status(405).send("Method Not Allowed");
-        return;
-    }
-    const jsonBody = req.body;
-    const writeResult = await getFirestore()
-        .collection("logs")
-        .add(jsonBody);
-    res.json({ result: `Message with ID: ${writeResult.id} added.` });
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+  const jsonBody = req.body;
+  const deviceId = jsonBody.device;
+  const newDocument = await getFirestore().collection("devices").doc(deviceId);
+  newDocument.collection("logs").add(jsonBody);
+  res.json({ result: `Message with ID: ${newDocument.id} added.` });
 });

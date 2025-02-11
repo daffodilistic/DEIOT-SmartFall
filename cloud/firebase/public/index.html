@@ -123,7 +123,7 @@
     var mqttClient = null;
 
     // API endpoint to send data to Firebase Functions
-    const firebaseFunctionUrl = 'https://asia-southeast1-deiot-smartfall.cloudfunctions.net/addmessage';
+    const firebaseFunctionUrl = 'http://127.0.0.1:5001/deiot-smartfall/asia-southeast1/addmessage';
 
     // Define BLE Device Specs
     // NOTE: Chrome detects the device as "ESP32", no idea why
@@ -135,9 +135,9 @@
 
     // Global Variables to Handle Bluetooth
     var bleServer;
+    var bleDeviceId = 'SmartFall_UNKNOWN';
     var bleServiceObject;
     var sensorCharacteristicObject;
-    var deviceIdObject;
 
     // Connect Button (search for BLE Devices only if BLE is available)
     connectButton.addEventListener('click', (event) => {
@@ -199,11 +199,17 @@
             console.log("Notifications Started.");
 
             const sensorValue = await sensorCharacteristic.readValue();
-            console.log("Sensor value: ", sensorValue);
+            // console.log("Sensor value: ", sensorValue);
             displayValue(new TextDecoder().decode(sensorValue));
 
-            
-
+            const deviceIdCharacteristic = await service.getCharacteristic(deviceIdCharacteristicUuid);
+            const deviceIdObject = deviceIdCharacteristic;
+            const deviceIdValue = await deviceIdCharacteristic.readValue();
+            // console.log("Device ID value: ", deviceIdValue);
+            bleDeviceId = new TextDecoder().decode(deviceIdValue);
+            bleDeviceId = bleDeviceId.replace(/\0/g, ''); // Remove null characters
+            // console.log("Device ID: ", bleDeviceId);
+            bleStateContainer.innerHTML = `Connected to device ${device.name} (${bleDeviceId})`;
         } catch (error) {
             console.error("An error occurred:", error);
         }
@@ -324,11 +330,11 @@
 
             mqttClient.subscribe(mqttTopic, (err) => {
                 if (!err) {
-                    mqttClient.publish(mqttTopic, "SmartFall_WebClient,EVENT_CONNECT,0");
+                    mqttClient.publish(mqttTopic, `${bleDeviceId},EVENT_CONNECT,0`);
                     // Send data to Firebase Functions
                     const jsonData = {
                         "timestamp": Date.now(),
-                        "device": "SmartFall_WebClient",
+                        "device": bleDeviceId,
                         "event": "EVENT_CONNECT",
                         "value": 0
                     };
@@ -347,10 +353,10 @@
         if (gValue > 1.5) {
             if (mqttClient) {
                 console.log("Sending MQTT Message: ", value);
-                mqttClient.publish(mqttTopic, `SmartFall_WebClient,EVENT_SENSOR,${value}`);
+                mqttClient.publish(mqttTopic, `${bleDeviceId},EVENT_FALL,${value}`);
                 sendFirebaseData({
                     "timestamp": Date.now(),
-                    "device": "SmartFall_WebClient",
+                    "device": bleDeviceId,
                     "event": "EVENT_FALL",
                     "value": gValue
                 });
