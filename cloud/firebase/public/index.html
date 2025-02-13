@@ -36,6 +36,13 @@
                             Device</button>
                     </div>
                 </div>
+                <div
+                    style="margin-top: var(--pico-typography-spacing-vertical); display: flex; align-items: center; justify-content: center;">
+                    <label>
+                        <input type="checkbox" name="autoConnectMqtt" checked />
+                        Auto-connect to MQTT broker
+                    </label>
+                </div>
                 <p
                     style="text-align: center; margin-bottom: 0 !important; margin-top: var(--pico-typography-spacing-vertical);">
                     BLE state:
@@ -105,7 +112,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-app.js";
     import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-analytics.js";
 
-    
+
     // DOM Elements
     const connectButton = document.getElementById('connectBleButton');
     const disconnectButton = document.getElementById('disconnectBleButton');
@@ -119,7 +126,7 @@
     const mqttConnectButton = document.getElementById('connectMqttButton');
     const mqttDisconnectButton = document.getElementById('disconnectMqttButton');
     const mqttStateContainer = document.getElementById('mqttState');
-
+    const autoConnectMqttCheckbox = document.querySelector('input[name=autoConnectMqtt]');
 
     // Pre-fill MQTT broker
     mqttBroker.value = "broker.emqx.io";
@@ -193,6 +200,12 @@
                 optionalServices: [bleServiceUuid]
             });
             console.log('Device Selected:', device.name);
+
+            // Connect to MQTT after device selection
+            if (autoConnectMqttCheckbox.checked) {
+                connectMqttBroker();
+            }
+
             bleStateContainer.innerHTML = 'Connected to device ' + device.name;
             bleStateContainer.style.color = "#24af37";
             device.addEventListener('gattservicedisconnected', onDisconnected);
@@ -274,6 +287,9 @@
 
     function disconnectDevice() {
         console.log("Disconnect Device.");
+        if (autoConnectMqttCheckbox.checked) {
+            disconnectMqttBroker();
+        }
         if (bleServer && bleServer.connected) {
             if (sensorCharacteristicObject) {
                 sensorCharacteristicObject.stopNotifications()
