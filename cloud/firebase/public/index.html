@@ -101,7 +101,11 @@
         </div>
     </main>
 </body>
-<script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-app.js";
+    import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-analytics.js";
+
+    
     // DOM Elements
     const connectButton = document.getElementById('connectBleButton');
     const disconnectButton = document.getElementById('disconnectBleButton');
@@ -116,14 +120,13 @@
     const mqttDisconnectButton = document.getElementById('disconnectMqttButton');
     const mqttStateContainer = document.getElementById('mqttState');
 
+
     // Pre-fill MQTT broker
     mqttBroker.value = "broker.emqx.io";
     // Global Variables to Handle MQTT
     const mqttTopic = "DEIOT/SmartFall";
     var mqttClient = null;
 
-    // API endpoint to send data to Firebase Functions
-    const firebaseFunctionUrl = 'http://127.0.0.1:5001/deiot-smartfall/asia-southeast1/addmessage';
 
     // Define BLE Device Specs
     // NOTE: Chrome detects the device as "ESP32", no idea why
@@ -132,12 +135,28 @@
     const ledCharacteristicUuid = parseInt('0x2BE2');
     const sensorCharacteristicUuid = parseInt('0x2C07');
     const deviceIdCharacteristicUuid = parseInt('0x2A00');
-
     // Global Variables to Handle Bluetooth
     var bleServer;
     var bleDeviceId = 'SmartFall_UNKNOWN';
     var bleServiceObject;
     var sensorCharacteristicObject;
+
+
+    // API endpoint to send data to Firebase Functions
+    const firebaseFunctionUrl = 'http://127.0.0.1:5001/deiot-smartfall/asia-southeast1/addmessage';
+    const firebaseConfig = {
+        apiKey: "AIzaSyDN03XEO7y-2uB8sz3eQM8MEIKiur_kFks",
+        authDomain: "deiot-smartfall.firebaseapp.com",
+        projectId: "deiot-smartfall",
+        storageBucket: "deiot-smartfall.firebasestorage.app",
+        messagingSenderId: "994318626662",
+        appId: "1:994318626662:web:c7e7b7a64aad7f2371e2a7",
+        measurementId: "G-0DPM7BWYXW"
+    };
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+
 
     // Connect Button (search for BLE Devices only if BLE is available)
     connectButton.addEventListener('click', (event) => {
@@ -145,14 +164,11 @@
             connectToDevice();
         }
     });
-
     // Disconnect Button
     disconnectButton.addEventListener('click', disconnectDevice);
-
     // Write to the ESP32 LED Characteristic
     onButton.addEventListener('click', () => writeOnCharacteristic(1));
     offButton.addEventListener('click', () => writeOnCharacteristic(0));
-
     // Connect to MQTT Broker
     mqttConnectButton.addEventListener('click', connectMqttBroker);
     mqttDisconnectButton.addEventListener('click', disconnectMqttBroker);
@@ -368,6 +384,17 @@
     }
 
     function sendFirebaseData(data) {
+        // Log event to Firebase Analytics
+        switch (data.event) {
+            case "EVENT_FALL":
+                logEvent(analytics, 'smartfall_event', { name: 'fall' });
+                break;
+            case "EVENT_CONNECT":
+                logEvent(analytics, 'smartfall_event', { name: 'connect' });
+                break;
+        }
+
+        // Write data to Firebase Functions
         fetch(firebaseFunctionUrl, {
             method: 'POST',
             headers: {
